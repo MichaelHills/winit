@@ -158,6 +158,7 @@ impl Window {
             Some(Fullscreen::Borderless(RootMonitorHandle {
                 inner: PlatformMonitorHandle::Wayland(ref monitor_id),
             })) => frame.set_fullscreen(Some(&monitor_id.proxy)),
+            #[cfg(feature = "x11")]
             Some(Fullscreen::Borderless(_)) => unreachable!(),
             None => {
                 if attributes.maximized {
@@ -354,6 +355,7 @@ impl Window {
                     .unwrap()
                     .set_fullscreen(Some(&monitor_id.proxy));
             }
+            #[cfg(feature = "x11")]
             Some(Fullscreen::Borderless(_)) => unreachable!(),
             None => self.frame.lock().unwrap().unset_fullscreen(),
         }
@@ -461,7 +463,7 @@ pub struct WindowStoreForEach<'a> {
     pub grab_cursor: Option<bool>,
     pub surface: &'a wl_surface::WlSurface,
     pub wid: WindowId,
-    pub frame: Option<&'a mut SWindow<ConceptFrame>>,
+    pub frame: Option<Arc<Mutex<SWindow<ConceptFrame>>>>,
     pub decorations_action: Option<DecorationsAction>,
 }
 
@@ -522,8 +524,7 @@ impl WindowStore {
             if let Some(scale_factor) = window.new_scale_factor {
                 window.current_scale_factor = scale_factor;
             }
-            let opt_arc = window.frame.upgrade();
-            let mut opt_mutex_lock = opt_arc.as_ref().map(|m| m.lock().unwrap());
+            let frame = window.frame.upgrade();
             let decorations_action = { window.pending_decorations_action.lock().unwrap().take() };
             f(WindowStoreForEach {
                 new_size: window.new_size.take(),
@@ -534,7 +535,7 @@ impl WindowStore {
                 grab_cursor: window.cursor_grab_changed.lock().unwrap().take(),
                 surface: &window.surface,
                 wid: make_wid(&window.surface),
-                frame: opt_mutex_lock.as_mut().map(|m| &mut **m),
+                frame,
                 decorations_action,
             });
             // avoid re-spamming the event
@@ -544,16 +545,15 @@ impl WindowStore {
 
     pub fn for_each_redraw_trigger<F>(&mut self, mut f: F)
     where
-        F: FnMut(bool, bool, WindowId, Option<&mut SWindow<ConceptFrame>>),
+        F: FnMut(bool, bool, WindowId, Option<Arc<Mutex<SWindow<ConceptFrame>>>>),
     {
         for window in &mut self.windows {
-            let opt_arc = window.frame.upgrade();
-            let mut opt_mutex_lock = opt_arc.as_ref().map(|m| m.lock().unwrap());
+            let frame = window.frame.upgrade();
             f(
                 replace(&mut *window.need_refresh.lock().unwrap(), false),
                 replace(&mut *window.need_frame_refresh.lock().unwrap(), false),
                 make_wid(&window.surface),
-                opt_mutex_lock.as_mut().map(|m| &mut **m),
+                frame,
             );
         }
     }
